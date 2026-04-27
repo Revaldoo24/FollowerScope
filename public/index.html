@@ -1,0 +1,79 @@
+﻿<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Social Insights Scraper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="bg-glow bg-glow-a"></div>
+    <div class="bg-glow bg-glow-b"></div>
+
+    <main class="container">
+      <header class="hero">
+        <p class="kicker">Social Analytics Toolkit</p>
+        <h1>Social Insights Checker</h1>
+        <p class="subtitle" id="subtitleText">
+          Pilih platform lalu masukkan list username (pisah baris atau koma)
+        </p>
+      </header>
+
+      <section class="panel">
+        <div class="menu" role="tablist" aria-label="Platform menu">
+          <button class="menu-btn active" id="instagramTab" data-platform="instagram" type="button">Instagram</button>
+          <button class="menu-btn" id="tiktokTab" data-platform="tiktok" type="button">TikTok</button>
+          <button class="menu-btn" id="igContentTab" data-platform="instagram-content" type="button">IG Content Views</button>
+          <button class="menu-btn" id="ttContentTab" data-platform="tiktok-content" type="button">TikTok Content Views</button>
+        </div>
+
+        <textarea id="usernames" rows="8" placeholder="contoh:\ncristiano\nnike\nnatgeo"></textarea>
+
+        <div class="tools-row">
+          <button id="importFileBtn" type="button" class="secondary-btn">Upload .txt/.csv</button>
+          <button id="settingsToggleBtn" type="button" class="secondary-btn">Settings</button>
+          <input id="fileInput" type="file" accept=".txt,.csv,text/plain,text/csv" hidden />
+        </div>
+
+        <div id="settingsPanel" class="settings-panel hidden">
+          <label class="tool-field tool-field-session">
+            Instagram Session ID (opsional)
+            <input id="sessionIdInput" type="text" placeholder="sessionid kamu..." autocomplete="off" />
+          </label>
+          <label class="tool-field tool-field-compact">
+            Batch
+            <input id="batchSizeInput" type="number" min="1" max="100" value="50" />
+          </label>
+          <label class="tool-field tool-field-compact">
+            Retry
+            <input id="retryCountInput" type="number" min="0" max="5" value="2" />
+          </label>
+        </div>
+
+        <div id="progressBox" class="progress-box hidden">
+          <div id="progressText">Menyiapkan batch...</div>
+          <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
+        </div>
+
+        <div class="actions">
+          <button id="checkBtn">Cek Followers</button>
+          <button id="exportJsonBtn" type="button" class="secondary-btn" disabled>Export JSON</button>
+          <button id="exportCsvBtn" type="button" class="secondary-btn" disabled>Export CSV</button>
+        </div>
+
+        <p class="note" id="platformNote">Gunakan hanya untuk akun publik dan patuhi Terms Instagram.</p>
+      </section>
+
+      <section id="summary" class="summary hidden"></section>
+      <section id="result" class="result"></section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

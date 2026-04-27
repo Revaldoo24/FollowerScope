@@ -2,8 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json package-lock.json .npmrc ./
-RUN npm ci --omit=dev --omit=optional
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
 
 COPY . .
 

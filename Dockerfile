@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
+RUN npm install --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
 
 COPY . .
 

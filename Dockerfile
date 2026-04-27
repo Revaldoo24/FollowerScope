@@ -1,9 +1,9 @@
-FROM node:20-alpine
+FROM mcr.microsoft.com/playwright:v1.59.1-noble
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm install --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
+RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY . .
 

@@ -36,15 +36,18 @@
         <textarea id="usernames" rows="8" placeholder="contoh:\ncristiano\nnike\nnatgeo"></textarea>
 
         <div class="tools-row">
-          <button id="importFileBtn" type="button" class="secondary-btn">Upload .txt/.csv</button>
+          <button id="importFileBtn" type="button" class="secondary-btn">Upload File</button>
           <button id="settingsToggleBtn" type="button" class="secondary-btn">Settings</button>
-          <input id="fileInput" type="file" accept=".txt,.csv,text/plain,text/csv" hidden />
+          <input id="fileInput" type="file" accept=".txt,.csv,.xlsx,.xls,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden />
         </div>
 
         <div id="settingsPanel" class="settings-panel hidden">
           <label class="tool-field tool-field-session">
             Instagram Session ID (opsional)
-            <input id="sessionIdInput" type="text" placeholder="sessionid kamu..." autocomplete="off" />
+            <div class="session-input-row">
+              <input id="sessionIdInput" type="text" placeholder="sessionid kamu..." autocomplete="off" />
+              <button id="saveSessionBtn" type="button" class="secondary-btn">Simpan</button>
+            </div>
           </label>
           <label class="tool-field tool-field-compact">
             Batch
@@ -65,6 +68,7 @@
           <button id="checkBtn">Cek Followers</button>
           <button id="exportJsonBtn" type="button" class="secondary-btn" disabled>Export JSON</button>
           <button id="exportCsvBtn" type="button" class="secondary-btn" disabled>Export CSV</button>
+          <button id="exportExcelBtn" type="button" class="secondary-btn" disabled>Export Excel</button>
         </div>
 
         <p class="note" id="platformNote">Gunakan hanya untuk akun publik dan patuhi Terms Instagram.</p>
@@ -74,6 +78,26 @@
       <section id="result" class="result"></section>
     </main>
 
+    <section id="importMapModal" class="import-map-modal hidden" aria-hidden="true">
+      <div class="import-map-card">
+        <h3>Mapping Kolom Import</h3>
+        <p>Pilih kolom yang dipakai sebagai input ke API.</p>
+        <label class="tool-field">
+          Kolom Input (username/link/item)
+          <select id="inputColumnSelect"></select>
+        </label>
+        <label class="tool-field">
+          Kolom Label (opsional, misal nama)
+          <select id="labelColumnSelect"></select>
+        </label>
+        <div class="actions">
+          <button id="applyImportMapBtn" type="button">Pakai Kolom</button>
+          <button id="cancelImportMapBtn" type="button" class="secondary-btn">Batal</button>
+        </div>
+      </div>
+    </section>
+
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

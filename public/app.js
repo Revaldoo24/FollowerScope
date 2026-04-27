@@ -10,6 +10,7 @@ const settingsToggleBtn = document.getElementById("settingsToggleBtn");
 const settingsPanel = document.getElementById("settingsPanel");
 const fileInput = document.getElementById("fileInput");
 const sessionIdInput = document.getElementById("sessionIdInput");
+const saveSessionBtn = document.getElementById("saveSessionBtn");
 const batchSizeInput = document.getElementById("batchSizeInput");
 const retryCountInput = document.getElementById("retryCountInput");
 const progressBox = document.getElementById("progressBox");
@@ -17,9 +18,17 @@ const progressText = document.getElementById("progressText");
 const progressFill = document.getElementById("progressFill");
 const exportJsonBtn = document.getElementById("exportJsonBtn");
 const exportCsvBtn = document.getElementById("exportCsvBtn");
+const exportExcelBtn = document.getElementById("exportExcelBtn");
+const importMapModal = document.getElementById("importMapModal");
+const inputColumnSelect = document.getElementById("inputColumnSelect");
+const labelColumnSelect = document.getElementById("labelColumnSelect");
+const applyImportMapBtn = document.getElementById("applyImportMapBtn");
+const cancelImportMapBtn = document.getElementById("cancelImportMapBtn");
 
 let activePlatform = "instagram";
 let latestPayload = null;
+let importedTableContext = null;
+let pendingImportedTable = null;
 const SESSION_STORAGE_KEY = "instagram-sessionid";
 const BATCH_SIZE_STORAGE_KEY = "batch-size";
 const RETRY_COUNT_STORAGE_KEY = "retry-count";
@@ -106,6 +115,134 @@ function downloadBlob(content, filename, type) {
   URL.revokeObjectURL(url);
 }
 
+function parseFileName(fileName) {
+  const parts = String(fileName || "").split(".");
+  if (parts.length <= 1) return { base: fileName || "result", ext: "" };
+  const ext = parts.pop().toLowerCase();
+  return { base: parts.join(".") || "result", ext };
+}
+
+function mapMetricValue(item) {
+  if (!item || item.status !== "ok") return "";
+  if (activePlatform === "instagram-content") return item.viewsAvailable ? item.views : "";
+  if (activePlatform === "tiktok-content") return item.views;
+  return item.followers;
+}
+
+function mapMetricHeader() {
+  if (activePlatform === "instagram-content" || activePlatform === "tiktok-content") return "views";
+  return "followers";
+}
+
+function mapResultInputKey() {
+  return activePlatform === "instagram-content" || activePlatform === "tiktok-content"
+    ? "input"
+    : "username";
+}
+
+function normalizedCompareValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function extractComparableInputByPlatform(value, platform) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  if (platform === "instagram") {
+    const direct = raw.replace(/^@/, "").trim();
+    if (/^[a-zA-Z0-9._]{1,30}$/.test(direct)) return direct.toLowerCase();
+    const urlMatch = raw.match(/instagram\.com\/([a-zA-Z0-9._]{1,30})\/?/i);
+    if (!urlMatch) return normalizedCompareValue(raw);
+    const reserved = new Set(["reel", "p", "tv", "explore", "accounts"]);
+    const candidate = urlMatch[1].toLowerCase();
+    if (reserved.has(candidate)) return normalizedCompareValue(raw);
+    return candidate;
+  }
+
+  if (platform === "tiktok") {
+    const direct = raw.replace(/^@/, "").trim();
+    if (/^[a-zA-Z0-9._]{1,30}$/.test(direct)) return direct.toLowerCase();
+    const urlMatch = raw.match(/tiktok\.com\/@([a-zA-Z0-9._]{1,30})/i);
+    return urlMatch?.[1]?.toLowerCase() || normalizedCompareValue(raw);
+  }
+
+  if (platform === "instagram-content") {
+    const shortcodeFromUrl = raw.match(/instagram\.com\/(?:reel|p|tv)\/([a-zA-Z0-9_-]{5,})/i)?.[1];
+    const shortcode = shortcodeFromUrl || raw;
+    return normalizedCompareValue(shortcode);
+  }
+
+  if (platform === "tiktok-content") {
+    const idFromUrl = raw.match(/tiktok\.com\/@[^/]+\/video\/(\d{10,25})/i)?.[1];
+    const videoId = idFromUrl || raw;
+    return normalizedCompareValue(videoId);
+  }
+
+  return normalizedCompareValue(raw);
+}
+
+function convertResultsToExcelRows(payload) {
+  if (!importedTableContext?.headers?.length || !importedTableContext?.rows?.length) {
+    return payload?.results || [];
+  }
+
+  const metricHeader = mapMetricHeader();
+  const resultInputKey = mapResultInputKey();
+  const inputHeader = importedTableContext.inputHeader;
+  const labelHeader = importedTableContext.labelHeader;
+  const headers = [...importedTableContext.headers];
+  const inputHeaderIndex = Math.max(0, headers.indexOf(inputHeader));
+  const insertedHeaders = [metricHeader, "status", "message"];
+  headers.splice(inputHeaderIndex + 1, 0, ...insertedHeaders);
+
+  const groupedResults = new Map();
+  (payload?.results || []).forEach((item) => {
+    const key = extractComparableInputByPlatform(item?.[resultInputKey], activePlatform);
+    if (!key) return;
+    if (!groupedResults.has(key)) groupedResults.set(key, []);
+    groupedResults.get(key).push(item);
+  });
+
+  return importedTableContext.rows.map((row) => {
+    const rowInputRaw = row[inputHeader];
+    const rowKey = extractComparableInputByPlatform(rowInputRaw, activePlatform);
+    const group = groupedResults.get(rowKey) || [];
+    const matched = group.length ? group.shift() : null;
+
+    const baseRow = {};
+    headers.forEach((header) => {
+      baseRow[header] = "";
+    });
+
+    importedTableContext.headers.forEach((header) => {
+      baseRow[header] = row[header] ?? "";
+    });
+
+    baseRow[metricHeader] = mapMetricValue(matched);
+    baseRow.status = matched?.status || "not_found";
+    baseRow.message = matched?.message || "";
+
+    if (labelHeader && !baseRow[labelHeader]) {
+      baseRow[labelHeader] = row[labelHeader] ?? "";
+    }
+
+    return baseRow;
+  });
+}
+
+function exportResultToExcel(payload) {
+  if (!window.XLSX) {
+    alert("Library Excel belum siap. Refresh halaman lalu coba lagi.");
+    return;
+  }
+
+  const rows = convertResultsToExcelRows(payload);
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, "Result");
+  XLSX.writeFile(wb, `result-${activePlatform}-${Date.now()}.xlsx`);
+}
+
 function convertResultsToCsv(payload) {
   const rows = payload?.results || [];
   if (!rows.length) return "status\n";
@@ -130,6 +267,7 @@ function convertResultsToCsv(payload) {
 function setExportEnabled(enabled) {
   exportJsonBtn.disabled = !enabled;
   exportCsvBtn.disabled = !enabled;
+  if (exportExcelBtn) exportExcelBtn.disabled = !enabled;
 }
 
 function toggleSettingsPanel(forceOpen) {
@@ -140,6 +278,54 @@ function toggleSettingsPanel(forceOpen) {
 
   settingsPanel.classList.toggle("hidden", !shouldOpen);
   settingsToggleBtn.textContent = shouldOpen ? "Hide Settings" : "Settings";
+}
+
+function closeImportMapModal() {
+  if (!importMapModal) return;
+  importMapModal.classList.add("hidden");
+  importMapModal.setAttribute("aria-hidden", "true");
+}
+
+function openImportMapModal(headers) {
+  if (!importMapModal || !inputColumnSelect || !labelColumnSelect) return;
+  inputColumnSelect.innerHTML = "";
+  labelColumnSelect.innerHTML = "";
+
+  headers.forEach((header) => {
+    const inputOpt = document.createElement("option");
+    inputOpt.value = header;
+    inputOpt.textContent = header;
+    inputColumnSelect.appendChild(inputOpt);
+
+    const labelOpt = document.createElement("option");
+    labelOpt.value = header;
+    labelOpt.textContent = header;
+    labelColumnSelect.appendChild(labelOpt);
+  });
+
+  const noneOpt = document.createElement("option");
+  noneOpt.value = "";
+  noneOpt.textContent = "(Tanpa kolom label)";
+  labelColumnSelect.prepend(noneOpt);
+  labelColumnSelect.value = "";
+
+  const suggestedInput = headers.find((h) => /username|user|link|url|ig|tiktok|input/i.test(h));
+  if (suggestedInput) inputColumnSelect.value = suggestedInput;
+  const suggestedLabel = headers.find((h) => /nama|name|label/i.test(h));
+  if (suggestedLabel) labelColumnSelect.value = suggestedLabel;
+
+  importMapModal.classList.remove("hidden");
+  importMapModal.setAttribute("aria-hidden", "false");
+}
+
+function parseSpreadsheetFile(file, buffer) {
+  if (!window.XLSX) throw new Error("Library Excel tidak tersedia");
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const firstSheet = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[firstSheet];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  const headers = rows.length ? Object.keys(rows[0]) : [];
+  return { rows, headers };
 }
 
 function hasSessionExpiredSignal(payload) {
@@ -323,10 +509,40 @@ importFileBtn.addEventListener("click", () => {
 fileInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
-  const text = await file.text();
-  const existing = usernamesInput.value.trim();
-  usernamesInput.value = existing ? `${existing}\n${text}` : text;
-  fileInput.value = "";
+  try {
+    const { ext } = parseFileName(file.name);
+    const isSheet = ext === "xlsx" || ext === "xls";
+    const isCsv = ext === "csv";
+
+    if (isSheet || isCsv) {
+      const buffer = await file.arrayBuffer();
+      const parsed = parseSpreadsheetFile(file, buffer);
+
+      if (!parsed.rows.length || !parsed.headers.length) {
+        alert("File kosong atau tidak memiliki header.");
+        fileInput.value = "";
+        return;
+      }
+
+      pendingImportedTable = {
+        fileName: file.name,
+        rows: parsed.rows,
+        headers: parsed.headers,
+      };
+      openImportMapModal(parsed.headers);
+      fileInput.value = "";
+      return;
+    }
+
+    const text = await file.text();
+    importedTableContext = null;
+    const existing = usernamesInput.value.trim();
+    usernamesInput.value = existing ? `${existing}\n${text}` : text;
+    fileInput.value = "";
+  } catch (error) {
+    alert(error.message || "Gagal membaca file");
+    fileInput.value = "";
+  }
 });
 
 exportJsonBtn.addEventListener("click", () => {
@@ -347,13 +563,67 @@ exportCsvBtn.addEventListener("click", () => {
   );
 });
 
+if (exportExcelBtn) {
+  exportExcelBtn.addEventListener("click", () => {
+    if (!latestPayload) return;
+    exportResultToExcel(latestPayload);
+  });
+}
+
+if (applyImportMapBtn) {
+  applyImportMapBtn.addEventListener("click", () => {
+    if (!pendingImportedTable) return;
+    const selectedInputHeader = inputColumnSelect?.value;
+    const selectedLabelHeader = labelColumnSelect?.value || "";
+    if (!selectedInputHeader) {
+      alert("Pilih kolom input dulu.");
+      return;
+    }
+
+    const extractedInputs = pendingImportedTable.rows
+      .map((row) => String(row[selectedInputHeader] || "").trim())
+      .filter(Boolean);
+
+    if (!extractedInputs.length) {
+      alert("Kolom input kosong.");
+      return;
+    }
+
+    importedTableContext = {
+      fileName: pendingImportedTable.fileName,
+      headers: pendingImportedTable.headers,
+      rows: pendingImportedTable.rows,
+      inputHeader: selectedInputHeader,
+      labelHeader: selectedLabelHeader,
+    };
+
+    usernamesInput.value = extractedInputs.join("\n");
+    pendingImportedTable = null;
+    closeImportMapModal();
+  });
+}
+
+if (cancelImportMapBtn) {
+  cancelImportMapBtn.addEventListener("click", () => {
+    pendingImportedTable = null;
+    closeImportMapModal();
+  });
+}
+
 if (sessionIdInput) {
   const savedSession = localStorage.getItem(SESSION_STORAGE_KEY);
   if (savedSession) {
     sessionIdInput.value = savedSession;
   }
   sessionIdInput.addEventListener("input", () => {
+    // user can type freely, explicit save via button below
+  });
+}
+
+if (saveSessionBtn) {
+  saveSessionBtn.addEventListener("click", () => {
     localStorage.setItem(SESSION_STORAGE_KEY, getSessionIdValue());
+    alert("Session ID disimpan.");
   });
 }
 
@@ -394,6 +664,7 @@ checkBtn.addEventListener("click", async () => {
   checkBtn.disabled = true;
   importFileBtn.disabled = true;
   if (settingsToggleBtn) settingsToggleBtn.disabled = true;
+  if (saveSessionBtn) saveSessionBtn.disabled = true;
   if (sessionIdInput) sessionIdInput.disabled = true;
   batchSizeInput.disabled = true;
   retryCountInput.disabled = true;
@@ -418,6 +689,7 @@ checkBtn.addEventListener("click", async () => {
     checkBtn.disabled = false;
     importFileBtn.disabled = false;
     if (settingsToggleBtn) settingsToggleBtn.disabled = false;
+    if (saveSessionBtn) saveSessionBtn.disabled = false;
     if (sessionIdInput) sessionIdInput.disabled = false;
     batchSizeInput.disabled = false;
     retryCountInput.disabled = false;

@@ -464,6 +464,7 @@ async function fetchWithRetry(platform, chunk, batchIndex, totalBatches) {
           sessionid: getSessionIdValue(),
           throttleMs: safeDelayMs(),
           jitterMs: safeJitterMs(),
+          retryCount: safeRetryCount(),
         }),
       });
 

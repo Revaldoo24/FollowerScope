@@ -639,6 +639,33 @@ async function fetchTikTokContentViews(contentInput) {
   };
 }
 
+async function fetchTikTokContentViewsWithRetry(contentInput, retryCount, waitMs) {
+  const maxRetry = Math.max(0, Math.min(5, Number(retryCount) || 0));
+  const safeWaitMs = Math.max(500, Math.min(10000, Number(waitMs) || 1200));
+
+  let lastError = null;
+  for (let attempt = 0; attempt <= maxRetry; attempt += 1) {
+    try {
+      return await fetchTikTokContentViews(contentInput);
+    } catch (err) {
+      lastError = err;
+      const message = String(err?.message || "");
+      const hitRateLimit =
+        /free api limit/i.test(message) ||
+        /1 request\/second/i.test(message) ||
+        /too many request/i.test(message);
+
+      if (!hitRateLimit || attempt >= maxRetry) {
+        throw err;
+      }
+
+      await sleep(safeWaitMs + attempt * 400);
+    }
+  }
+
+  throw lastError || new Error("Unknown error");
+}
+
 async function fetchInstagramContentViews(contentInput, sessionId) {
   const extracted = extractInstagramShortcode(contentInput);
   if (!extracted) {
@@ -970,6 +997,9 @@ app.post("/api/instagram/content-views", async (req, res) => {
 app.post("/api/tiktok/content-views", async (req, res) => {
   try {
     const inputs = normalizeContentInputs(req.body?.items || req.body?.usernames);
+    const throttleMs = toSafeDelay(req.body?.throttleMs, 1200, 10000);
+    const jitterMs = toSafeDelay(req.body?.jitterMs, 800, 5000);
+    const retryCount = toSafeDelay(req.body?.retryCount, 2, 5);
 
     if (!inputs.length) {
       return res.status(400).json({
@@ -984,9 +1014,10 @@ app.post("/api/tiktok/content-views", async (req, res) => {
     }
 
     const results = [];
-    for (const item of inputs) {
+    for (let i = 0; i < inputs.length; i += 1) {
+      const item = inputs[i];
       try {
-        const data = await fetchTikTokContentViews(item);
+        const data = await fetchTikTokContentViewsWithRetry(item, retryCount, throttleMs);
         results.push({ status: "ok", ...data });
       } catch (err) {
         results.push({
@@ -994,6 +1025,10 @@ app.post("/api/tiktok/content-views", async (req, res) => {
           input: item,
           message: `Gagal mengambil data (${err.message})`,
         });
+      }
+
+      if (i < inputs.length - 1) {
+        await sleepWithJitter(throttleMs, jitterMs);
       }
     }
 

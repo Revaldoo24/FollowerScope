@@ -196,6 +196,24 @@ function getInstagramCookieHeader(sessionId) {
   return `sessionid=${sessionId};`;
 }
 
+function toSafeDelay(value, fallback, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(max, Math.floor(n)));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function sleepWithJitter(baseMs, jitterMs) {
+  const jitter = jitterMs > 0 ? Math.floor(Math.random() * (jitterMs + 1)) : 0;
+  const total = baseMs + jitter;
+  if (total > 0) {
+    await sleep(total);
+  }
+}
+
 function findMediaByShortcodeInGraphql(payload, shortcode) {
   if (!payload || typeof payload !== "object") return null;
 
@@ -788,6 +806,8 @@ app.post("/api/followers", async (req, res) => {
   try {
     const usernames = normalizeUsernames(req.body?.usernames, "instagram");
     const sessionId = resolveInstagramSessionId(req.body?.sessionid);
+    const throttleMs = toSafeDelay(req.body?.throttleMs, 1200, 10000);
+    const jitterMs = toSafeDelay(req.body?.jitterMs, 800, 5000);
 
     if (!usernames.length) {
       return res.status(400).json({
@@ -801,27 +821,31 @@ app.post("/api/followers", async (req, res) => {
       });
     }
 
-    const results = await Promise.all(
-      usernames.map(async (username) => {
-        try {
-          const data = await fetchFollowersByUsername(username, sessionId);
-          return { status: "ok", ...data };
-        } catch (err) {
-          const isSessionExpired = err?.message === "SESSION_EXPIRED";
-          return {
-            status: "error",
-            username,
-            code: isSessionExpired ? "SESSION_EXPIRED" : undefined,
-            message:
-              isSessionExpired
-                ? "Session Instagram expired. Update sessionid lalu coba lagi."
-                : err?.response?.status === 404
-                ? "Username tidak ditemukan"
-                : `Gagal mengambil data (${err.message})`,
-          };
-        }
-      })
-    );
+    const results = [];
+    for (let i = 0; i < usernames.length; i += 1) {
+      const username = usernames[i];
+      try {
+        const data = await fetchFollowersByUsername(username, sessionId);
+        results.push({ status: "ok", ...data });
+      } catch (err) {
+        const isSessionExpired = err?.message === "SESSION_EXPIRED";
+        results.push({
+          status: "error",
+          username,
+          code: isSessionExpired ? "SESSION_EXPIRED" : undefined,
+          message:
+            isSessionExpired
+              ? "Session Instagram expired. Update sessionid lalu coba lagi."
+              : err?.response?.status === 404
+              ? "Username tidak ditemukan"
+              : `Gagal mengambil data (${err.message})`,
+        });
+      }
+
+      if (i < usernames.length - 1) {
+        await sleepWithJitter(throttleMs, jitterMs);
+      }
+    }
 
     const sessionExpired = results.filter((r) => r.code === "SESSION_EXPIRED").length;
     res.json({
@@ -888,6 +912,8 @@ app.post("/api/instagram/content-views", async (req, res) => {
   try {
     const inputs = normalizeContentInputs(req.body?.items || req.body?.usernames);
     const sessionId = resolveInstagramSessionId(req.body?.sessionid);
+    const throttleMs = toSafeDelay(req.body?.throttleMs, 1200, 10000);
+    const jitterMs = toSafeDelay(req.body?.jitterMs, 800, 5000);
 
     if (!inputs.length) {
       return res.status(400).json({
@@ -901,24 +927,28 @@ app.post("/api/instagram/content-views", async (req, res) => {
       });
     }
 
-    const results = await Promise.all(
-      inputs.map(async (item) => {
-        try {
-          const data = await fetchInstagramContentViews(item, sessionId);
-          return { status: "ok", ...data };
-        } catch (err) {
-          const isSessionExpired = err?.message === "SESSION_EXPIRED";
-          return {
-            status: "error",
-            input: item,
-            code: isSessionExpired ? "SESSION_EXPIRED" : undefined,
-            message: isSessionExpired
-              ? "Session Instagram expired. Update sessionid lalu coba lagi."
-              : `Gagal mengambil data (${err.message})`,
-          };
-        }
-      })
-    );
+    const results = [];
+    for (let i = 0; i < inputs.length; i += 1) {
+      const item = inputs[i];
+      try {
+        const data = await fetchInstagramContentViews(item, sessionId);
+        results.push({ status: "ok", ...data });
+      } catch (err) {
+        const isSessionExpired = err?.message === "SESSION_EXPIRED";
+        results.push({
+          status: "error",
+          input: item,
+          code: isSessionExpired ? "SESSION_EXPIRED" : undefined,
+          message: isSessionExpired
+            ? "Session Instagram expired. Update sessionid lalu coba lagi."
+            : `Gagal mengambil data (${err.message})`,
+        });
+      }
+
+      if (i < inputs.length - 1) {
+        await sleepWithJitter(throttleMs, jitterMs);
+      }
+    }
 
     const sessionExpired = results.filter((r) => r.code === "SESSION_EXPIRED").length;
     res.json({

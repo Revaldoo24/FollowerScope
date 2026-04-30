@@ -13,6 +13,8 @@ const sessionIdInput = document.getElementById("sessionIdInput");
 const saveSessionBtn = document.getElementById("saveSessionBtn");
 const batchSizeInput = document.getElementById("batchSizeInput");
 const retryCountInput = document.getElementById("retryCountInput");
+const delayMsInput = document.getElementById("delayMsInput");
+const jitterMsInput = document.getElementById("jitterMsInput");
 const progressBox = document.getElementById("progressBox");
 const progressText = document.getElementById("progressText");
 const progressFill = document.getElementById("progressFill");
@@ -32,6 +34,8 @@ let pendingImportedTable = null;
 const SESSION_STORAGE_KEY = "instagram-sessionid";
 const BATCH_SIZE_STORAGE_KEY = "batch-size";
 const RETRY_COUNT_STORAGE_KEY = "retry-count";
+const DELAY_MS_STORAGE_KEY = "delay-ms";
+const JITTER_MS_STORAGE_KEY = "jitter-ms";
 
 function parseEntries(text) {
   return [
@@ -71,6 +75,16 @@ function safeBatchSize() {
 function safeRetryCount() {
   const raw = Number(retryCountInput.value || 2);
   return Math.max(0, Math.min(5, Math.floor(raw || 0)));
+}
+
+function safeDelayMs() {
+  const raw = Number(delayMsInput?.value || 1200);
+  return Math.max(0, Math.min(10000, Math.floor(raw || 0)));
+}
+
+function safeJitterMs() {
+  const raw = Number(jitterMsInput?.value || 800);
+  return Math.max(0, Math.min(5000, Math.floor(raw || 0)));
 }
 
 function updateProgress(currentBatch, totalBatches, currentAttempt, maxAttempts, label) {
@@ -448,6 +462,8 @@ async function fetchWithRetry(platform, chunk, batchIndex, totalBatches) {
         body: JSON.stringify({
           [key]: chunk,
           sessionid: getSessionIdValue(),
+          throttleMs: safeDelayMs(),
+          jitterMs: safeJitterMs(),
         }),
       });
 
@@ -643,6 +659,22 @@ if (retryCountInput) {
   });
 }
 
+if (delayMsInput) {
+  const savedDelayMs = localStorage.getItem(DELAY_MS_STORAGE_KEY);
+  if (savedDelayMs) delayMsInput.value = savedDelayMs;
+  delayMsInput.addEventListener("input", () => {
+    localStorage.setItem(DELAY_MS_STORAGE_KEY, String(delayMsInput.value || ""));
+  });
+}
+
+if (jitterMsInput) {
+  const savedJitterMs = localStorage.getItem(JITTER_MS_STORAGE_KEY);
+  if (savedJitterMs) jitterMsInput.value = savedJitterMs;
+  jitterMsInput.addEventListener("input", () => {
+    localStorage.setItem(JITTER_MS_STORAGE_KEY, String(jitterMsInput.value || ""));
+  });
+}
+
 if (settingsToggleBtn) {
   settingsToggleBtn.addEventListener("click", () => {
     toggleSettingsPanel();
@@ -668,6 +700,8 @@ checkBtn.addEventListener("click", async () => {
   if (sessionIdInput) sessionIdInput.disabled = true;
   batchSizeInput.disabled = true;
   retryCountInput.disabled = true;
+  if (delayMsInput) delayMsInput.disabled = true;
+  if (jitterMsInput) jitterMsInput.disabled = true;
   setExportEnabled(false);
 
   const prevText = checkBtn.textContent;
@@ -693,6 +727,8 @@ checkBtn.addEventListener("click", async () => {
     if (sessionIdInput) sessionIdInput.disabled = false;
     batchSizeInput.disabled = false;
     retryCountInput.disabled = false;
+    if (delayMsInput) delayMsInput.disabled = false;
+    if (jitterMsInput) jitterMsInput.disabled = false;
     checkBtn.textContent = prevText;
     hideProgress();
   }

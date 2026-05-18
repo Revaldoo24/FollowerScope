@@ -590,9 +590,10 @@ async function fetchFollowersByUsername(username, sessionId) {
     const contentMatch = match[0].match(/content="([^"]+)"/i) || match[0].match(/content='([^']+)'/i);
     if (contentMatch) {
       const content = contentMatch[1];
-      if (content.match(/([\d.,KM]+)\s*Followers/i)) {
+      const followersMatch = content.match(/([\d.,KM]+)\s*Followers/i);
+      if (followersMatch) {
         ogDescription = content;
-        followersReadable = content.split(",")[0]?.trim();
+        followersReadable = followersMatch[1];
         break;
       }
     }

@@ -572,29 +572,50 @@ async function fetchFollowersByUsername(username, sessionId) {
 
   const html = String(htmlRes.data || "");
 
-  if (isInstagramLoginPage(html)) {
-    throw new Error(
-      sessionId
-        ? "Session Instagram expired atau tidak valid. Update sessionid lalu coba lagi."
-        : "IP server diblokir Instagram. Masukkan Session ID di Settings agar berhasil."
-    );
+  // Deteksi login page
+  const isLoginPage = html.includes('Login • Instagram') || 
+                      html.includes('class="x1lliihq x1n2onr6 x5n08af"') || // icon close popup
+                      html.includes('"is_login_page":true') ||
+                      html.includes('Sign up to see photos and videos');
+                      
+  // Kita coba parse dulu, kalau gagal dan terdeteksi halaman login, lempar error login
+  
+  // Ekstrak meta description dengan regex yang fleksibel (bisa property=... content=... atau sebaliknya)
+  let followersReadable = null;
+  let ogDescription = "";
+  
+  const descRegex = /<meta[^>]+(?:name|property)=["'](?:og:)?description["'][^>]*>/ig;
+  let match;
+  while ((match = descRegex.exec(html)) !== null) {
+    const contentMatch = match[0].match(/content="([^"]+)"/i) || match[0].match(/content='([^']+)'/i);
+    if (contentMatch) {
+      const content = contentMatch[1];
+      if (content.match(/([\d.,KM]+)\s*Followers/i)) {
+        ogDescription = content;
+        followersReadable = content.split(",")[0]?.trim();
+        break;
+      }
+    }
   }
 
-  const ogMetaMatch = html.match(/<meta[^>]+(?:property|name)=["']og:description["'][^>]*>/i);
-  const ogDescriptionMatch = ogMetaMatch?.[0]?.match(/content=["']([^"']+)["']/i);
-  const ogDescription = ogDescriptionMatch?.[1] || "";
-  const followersReadable = ogDescription.split(",")[0]?.trim();
+  if (!followersReadable) {
+    if (isLoginPage) {
+      throw new Error(
+        sessionId
+          ? "Session Instagram expired atau tidak valid. Update sessionid lalu coba lagi."
+          : "IP server diblokir Instagram. Masukkan Session ID di Settings agar berhasil."
+      );
+    }
+    throw new Error("Followers count tidak tersedia");
+  }
+
   const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
   const canonicalUsernameMatch = html.match(/@([a-zA-Z0-9._]{1,30})\)/);
-  const fullNameFromDescMatch = ogDescription.match(/from\s+(.+?)\s+\(&#064;/i);
+  const fullNameFromDescMatch = ogDescription.match(/from\s+(.+?)\s+\(&#064;/i) || ogDescription.match(/from\s+(.+?)\s+\(@/i);
   const bioFromDescMatch = ogDescription.match(/on Instagram:\s*"([^"]*)"/i);
   const biographyFromJson = extractJsonStringField(html, "biography");
   const externalUrlFromJson = extractJsonStringField(html, "external_url");
   const bioLinkUrlFromJson = extractInstagramBioLinkUrl(html);
-
-  if (!followersReadable) {
-    throw new Error("Followers count tidak tersedia");
-  }
 
   const biographyText = biographyFromJson || bioFromDescMatch?.[1]?.trim() || "-";
   const externalUrl = externalUrlFromJson || bioLinkUrlFromJson || profileUrl;

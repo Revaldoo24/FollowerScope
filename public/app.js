@@ -553,6 +553,62 @@ async function runBatchedRequest(platform, entries) {
     };
   }
 
+  // ✅ TikTok followers & content views: 1 item per request, delay 500ms (= 2/detik)
+  // tikwm.com membatasi ~2 request/detik, lebih dari itu kena rate limit
+  if (platform === "tiktok" || platform === "tiktok-content") {
+    const TIKTOK_DELAY_MS = 500; // 2 request per detik
+    const endpoint = endpointByPlatform(platform);
+    const key = payloadKeyByPlatform(platform);
+    const maxAttempts = safeRetryCount() + 1;
+
+    for (let i = 0; i < entries.length; i++) {
+      updateProgress(i + 1, entries.length, 1, maxAttempts, entries[i]);
+      let result = null;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        updateProgress(i + 1, entries.length, attempt, maxAttempts, entries[i]);
+        try {
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              [key]: [entries[i]], // kirim 1 item saja
+              retryCount: 0,       // retry ditangani di sini
+            }),
+          });
+          const data = await res.json();
+          if (data.results?.[0]) {
+            result = data.results[0];
+            break;
+          }
+        } catch (_) {
+          if (attempt < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+          }
+        }
+      }
+
+      combined.push(result || {
+        status: "error",
+        ...(key === "items" ? { input: entries[i] } : { username: entries[i] }),
+        message: "Gagal mengambil data",
+      });
+
+      // Delay 500ms antar request = 2 per detik (kecuali yang terakhir)
+      if (i < entries.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, TIKTOK_DELAY_MS));
+      }
+    }
+
+    return {
+      total: combined.length,
+      success: combined.filter((r) => r.status === "ok").length,
+      failed: combined.filter((r) => r.status === "error").length,
+      results: combined,
+    };
+  }
+
+
   // Platform lain (TikTok, content views): tetap pakai batch ke server
   const size = safeBatchSize();
   const chunks = chunkArray(entries, size);

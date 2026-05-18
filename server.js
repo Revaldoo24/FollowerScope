@@ -478,83 +478,137 @@ async function fetchInstagramViewsFromUserReelsGraphql(ownerUsername, shortcode,
 }
 
 async function fetchFollowersByUsername(username, sessionId) {
-  const endpoint = `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
-
-  const headers = {
+  // Header browser-like yang lebih lengkap agar tidak mudah dideteksi sebagai bot
+  const browserHeaders = {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "X-IG-App-ID": "936619743392459",
-    Accept: "application/json",
+    "Accept-Language": "en-US,en;q=0.9,id;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://www.instagram.com/",
+    "Origin": "https://www.instagram.com",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
     ...(getInstagramCookieHeader(sessionId) ? { Cookie: getInstagramCookieHeader(sessionId) } : {}),
   };
 
+  // ── Endpoint 1: Instagram internal mobile API (paling reliable dengan session) ──
   try {
-    const response = await axios.get(endpoint, {
-      headers,
-      timeout: 15000,
-    });
-
+    const response = await axios.get(
+      `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
+      {
+        headers: {
+          ...browserHeaders,
+          "X-IG-App-ID": "936619743392459",
+          Accept: "application/json",
+        },
+        timeout: 8000, // aman untuk Vercel limit 10s
+      }
+    );
     const user = response?.data?.data?.user;
     const normalized = normalizeInstagramFollowerResult(user, username);
-    if (!normalized) {
-      throw new Error("Data user tidak ditemukan");
-    }
-    return normalized;
-  } catch (_) {
-    if (sessionId) {
-      const renderedGraphqlData = await fetchInstagramProfileFromRenderedGraphql(username, sessionId);
-      if (renderedGraphqlData) return renderedGraphqlData;
-    }
+    if (normalized) return normalized;
+  } catch (_) {}
 
-    const profileUrl = `https://www.instagram.com/${encodeURIComponent(username)}/`;
-    const htmlRes = await axios.get(profileUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Accept: "text/html",
-      },
-      timeout: 15000,
-      validateStatus: () => true,
-    });
-
-    if (htmlRes.status === 404) {
-      throw new Error("Username tidak ditemukan");
-    }
-
-    if (htmlRes.status >= 400) {
-      throw new Error("Gagal mengambil profil");
-    }
-
-    const html = String(htmlRes.data || "");
-    const ogMetaMatch = html.match(/<meta[^>]+(?:property|name)=["']og:description["'][^>]*>/i);
-    const ogDescriptionMatch = ogMetaMatch?.[0]?.match(/content=["']([^"']+)["']/i);
-    const ogDescription = ogDescriptionMatch?.[1] || "";
-    const followersReadable = ogDescription.split(",")[0]?.trim();
-    const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-    const canonicalUsernameMatch = html.match(/@([a-zA-Z0-9._]{1,30})\)/);
-    const fullNameFromDescMatch = ogDescription.match(/from\s+(.+?)\s+\(&#064;/i);
-    const bioFromDescMatch = ogDescription.match(/on Instagram:\s*"([^"]*)"/i);
-    const biographyFromJson = extractJsonStringField(html, "biography");
-    const externalUrlFromJson = extractJsonStringField(html, "external_url");
-    const bioLinkUrlFromJson = extractInstagramBioLinkUrl(html);
-
-    if (!followersReadable) {
-      throw new Error("Followers count tidak tersedia");
-    }
-
-    const biographyText = biographyFromJson || bioFromDescMatch?.[1]?.trim() || "-";
-    const externalUrl = externalUrlFromJson || bioLinkUrlFromJson || profileUrl;
-
-    return {
-      username: (canonicalUsernameMatch?.[1] || username).replace(/^@/, ""),
-      fullName: fullNameFromDescMatch?.[1] || titleMatch?.[1]?.split("(@")[0]?.trim() || "-",
-      bio: biographyText,
-      biography: biographyText,
-      url: externalUrl,
-      isPrivate: null,
-      isVerified: null,
-      followers: parseAbbrevNumber(followersReadable.replace(/\s*Followers$/i, "")) || followersReadable,
-    };
+  // ── Endpoint 2: Fallback JSON mode (?__a=1) ──
+  if (sessionId) {
+    try {
+      const response = await axios.get(
+        `https://www.instagram.com/${encodeURIComponent(username)}/?__a=1&__d=dis`,
+        {
+          headers: {
+            ...browserHeaders,
+            Accept: "application/json, text/plain, */*",
+          },
+          timeout: 8000,
+          validateStatus: () => true,
+        }
+      );
+      if (response.status === 200) {
+        const body = response.data || {};
+        // Format graphql lama
+        const graphqlUser = body?.graphql?.user;
+        if (graphqlUser) {
+          const normalized = normalizeInstagramFollowerResult({
+            ...graphqlUser,
+            follower_count: graphqlUser.edge_followed_by?.count,
+          }, username);
+          if (normalized) return normalized;
+        }
+        // Format baru
+        const altUser = body?.data?.user;
+        if (altUser) {
+          const normalized = normalizeInstagramFollowerResult(altUser, username);
+          if (normalized) return normalized;
+        }
+      }
+    } catch (_) {}
   }
+
+  // ── Endpoint 3: Playwright (aktif di VPS jika USE_PLAYWRIGHT=true) ──
+  if (sessionId) {
+    const renderedGraphqlData = await fetchInstagramProfileFromRenderedGraphql(username, sessionId);
+    if (renderedGraphqlData) return renderedGraphqlData;
+  }
+
+  // ── Endpoint 4: HTML scrape (last resort) ──
+  const profileUrl = `https://www.instagram.com/${encodeURIComponent(username)}/`;
+  const htmlRes = await axios.get(profileUrl, {
+    headers: {
+      ...browserHeaders,
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    },
+    timeout: 8000,
+    validateStatus: () => true,
+  });
+
+  if (htmlRes.status === 404) {
+    throw new Error("Username tidak ditemukan");
+  }
+
+  if (htmlRes.status >= 400) {
+    throw new Error("Gagal mengambil profil");
+  }
+
+  const html = String(htmlRes.data || "");
+
+  if (isInstagramLoginPage(html)) {
+    throw new Error(
+      sessionId
+        ? "Session Instagram expired atau tidak valid. Update sessionid lalu coba lagi."
+        : "IP server diblokir Instagram. Masukkan Session ID di Settings agar berhasil."
+    );
+  }
+
+  const ogMetaMatch = html.match(/<meta[^>]+(?:property|name)=["']og:description["'][^>]*>/i);
+  const ogDescriptionMatch = ogMetaMatch?.[0]?.match(/content=["']([^"']+)["']/i);
+  const ogDescription = ogDescriptionMatch?.[1] || "";
+  const followersReadable = ogDescription.split(",")[0]?.trim();
+  const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+  const canonicalUsernameMatch = html.match(/@([a-zA-Z0-9._]{1,30})\)/);
+  const fullNameFromDescMatch = ogDescription.match(/from\s+(.+?)\s+\(&#064;/i);
+  const bioFromDescMatch = ogDescription.match(/on Instagram:\s*"([^"]*)"/i);
+  const biographyFromJson = extractJsonStringField(html, "biography");
+  const externalUrlFromJson = extractJsonStringField(html, "external_url");
+  const bioLinkUrlFromJson = extractInstagramBioLinkUrl(html);
+
+  if (!followersReadable) {
+    throw new Error("Followers count tidak tersedia");
+  }
+
+  const biographyText = biographyFromJson || bioFromDescMatch?.[1]?.trim() || "-";
+  const externalUrl = externalUrlFromJson || bioLinkUrlFromJson || profileUrl;
+
+  return {
+    username: (canonicalUsernameMatch?.[1] || username).replace(/^@/, ""),
+    fullName: fullNameFromDescMatch?.[1] || titleMatch?.[1]?.split("(@")[0]?.trim() || "-",
+    bio: biographyText,
+    biography: biographyText,
+    url: externalUrl,
+    isPrivate: null,
+    isVerified: null,
+    followers: parseAbbrevNumber(followersReadable.replace(/\s*Followers$/i, "")) || followersReadable,
+  };
 }
 
 async function fetchTikTokFollowersByUsername(username) {

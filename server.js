@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const path = require("path");
@@ -214,6 +214,30 @@ async function sleepWithJitter(baseMs, jitterMs) {
   }
 }
 
+async function launchBrowserForRuntime() {
+  if (process.env.VERCEL) {
+    try {
+      const chromiumPack = require("@sparticuz/chromium");
+      const { chromium } = require("playwright-core");
+      return await chromium.launch({
+        args: chromiumPack.args,
+        defaultViewport: chromiumPack.defaultViewport,
+        executablePath: await chromiumPack.executablePath(),
+        headless: true,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  try {
+    const { chromium } = require("playwright");
+    return await chromium.launch({ headless: true });
+  } catch (_) {
+    return null;
+  }
+}
+
 function findMediaByShortcodeInGraphql(payload, shortcode) {
   if (!payload || typeof payload !== "object") return null;
 
@@ -290,14 +314,8 @@ function normalizeInstagramFollowerResult(user, fallbackUsername) {
 
 async function fetchInstagramProfileFromRenderedGraphql(username, sessionId) {
   if (!sessionId) return null;
-  let chromium = null;
-  try {
-    ({ chromium } = require("playwright"));
-  } catch (_) {
-    return null;
-  }
-
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowserForRuntime();
+  if (!browser) return null;
   try {
     const context = await browser.newContext();
     await context.addCookies([
@@ -342,14 +360,8 @@ async function fetchInstagramProfileFromRenderedGraphql(username, sessionId) {
 
 async function fetchInstagramViewsFromRenderedDom(url, shortcode, sessionId) {
   if (!sessionId) return null;
-  let chromium = null;
-  try {
-    ({ chromium } = require("playwright"));
-  } catch (_) {
-    return null;
-  }
-
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowserForRuntime();
+  if (!browser) return null;
   try {
     try {
       const context = await browser.newContext();
@@ -418,14 +430,8 @@ async function fetchInstagramViewsFromRenderedDom(url, shortcode, sessionId) {
 
 async function fetchInstagramViewsFromUserReelsGraphql(ownerUsername, shortcode, sessionId) {
   if (!sessionId || !ownerUsername) return null;
-  let chromium = null;
-  try {
-    ({ chromium } = require("playwright"));
-  } catch (_) {
-    return null;
-  }
-
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowserForRuntime();
+  if (!browser) return null;
   try {
     const context = await browser.newContext();
     await context.addCookies([
@@ -1049,3 +1055,4 @@ app.post("/api/tiktok/content-views", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+

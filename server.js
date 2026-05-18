@@ -215,9 +215,17 @@ async function sleepWithJitter(baseMs, jitterMs) {
 }
 
 async function launchBrowserForRuntime() {
-  // Playwright dihapus — terlalu berat untuk Vercel (timeout + RAM)
-  // Semua fungsi yang memanggil ini sudah handle: if (!browser) return null
-  return null;
+  // Aktifkan Playwright hanya jika USE_PLAYWRIGHT=true di .env
+  // → cocok untuk VPS (tidak ada timeout)
+  // → Vercel: jangan set USE_PLAYWRIGHT (terlalu berat, timeout 10s)
+  if (process.env.USE_PLAYWRIGHT !== "true") return null;
+
+  try {
+    const { chromium } = require("playwright");
+    return await chromium.launch({ headless: true });
+  } catch (_) {
+    return null;
+  }
 }
 
 function findMediaByShortcodeInGraphql(payload, shortcode) {

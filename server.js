@@ -215,27 +215,9 @@ async function sleepWithJitter(baseMs, jitterMs) {
 }
 
 async function launchBrowserForRuntime() {
-  if (process.env.VERCEL) {
-    try {
-      const chromiumPack = require("@sparticuz/chromium");
-      const { chromium } = require("playwright-core");
-      return await chromium.launch({
-        args: chromiumPack.args,
-        defaultViewport: chromiumPack.defaultViewport,
-        executablePath: await chromiumPack.executablePath(),
-        headless: true,
-      });
-    } catch (_) {
-      return null;
-    }
-  }
-
-  try {
-    const { chromium } = require("playwright");
-    return await chromium.launch({ headless: true });
-  } catch (_) {
-    return null;
-  }
+  // Playwright dihapus — terlalu berat untuk Vercel (timeout + RAM)
+  // Semua fungsi yang memanggil ini sudah handle: if (!browser) return null
+  return null;
 }
 
 function findMediaByShortcodeInGraphql(payload, shortcode) {
@@ -835,7 +817,35 @@ async function fetchInstagramContentViews(contentInput, sessionId) {
   throw new Error("Views tidak tersedia atau konten bukan video/reel");
 }
 
+// ✅ Endpoint single — 1 akun per request, aman di Vercel (< 3 detik)
+app.post("/api/followers/single", async (req, res) => {
+  try {
+    const username = extractProfileUsername(req.body?.username, "instagram");
+    const sessionId = resolveInstagramSessionId(req.body?.sessionid);
+
+    if (!username) {
+      return res.status(400).json({ error: "Username tidak valid." });
+    }
+
+    const data = await fetchFollowersByUsername(username, sessionId);
+    return res.json({ status: "ok", ...data });
+  } catch (err) {
+    const isSessionExpired = err?.message === "SESSION_EXPIRED";
+    return res.status(isSessionExpired ? 401 : 200).json({
+      status: "error",
+      username: req.body?.username,
+      code: isSessionExpired ? "SESSION_EXPIRED" : undefined,
+      message: isSessionExpired
+        ? "Session Instagram expired. Update sessionid lalu coba lagi."
+        : err?.response?.status === 404
+        ? "Username tidak ditemukan"
+        : `Gagal mengambil data (${err.message})`,
+    });
+  }
+});
+
 app.post("/api/followers", async (req, res) => {
+
   try {
     const usernames = normalizeUsernames(req.body?.usernames, "instagram");
     const sessionId = resolveInstagramSessionId(req.body?.sessionid);

@@ -1,4 +1,4 @@
-﻿const usernamesInput = document.getElementById("usernames");
+const usernamesInput = document.getElementById("usernames");
 const checkBtn = document.getElementById("checkBtn");
 const resultEl = document.getElementById("result");
 const summaryEl = document.getElementById("summary");
@@ -105,6 +105,12 @@ function endpointByPlatform(platform) {
   if (platform === "instagram-content") return "/api/instagram/content-views";
   if (platform === "tiktok-content") return "/api/tiktok/content-views";
   return "/api/followers";
+}
+
+// Endpoint single — 1 akun per request, aman untuk Vercel (< 3 detik)
+function singleEndpointByPlatform(platform) {
+  if (platform === "instagram") return "/api/followers/single";
+  return null; // platform lain tidak pakai single
 }
 
 function payloadKeyByPlatform(platform) {
@@ -447,6 +453,38 @@ function updatePlatformUI(platform) {
   platformNoteEl.textContent = "Gunakan hanya untuk akun publik dan patuhi Terms Instagram.";
 }
 
+async function fetchSingleInstagram(username, attempt, total) {
+  const maxAttempts = safeRetryCount() + 1;
+  let lastError = null;
+
+  for (let try_ = 1; try_ <= maxAttempts; try_++) {
+    updateProgress(attempt, total, try_, maxAttempts, `@${username}`);
+    try {
+      const res = await fetch("/api/followers/single", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username,
+          sessionid: getSessionIdValue(),
+        }),
+      });
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      lastError = err;
+      if (try_ < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * try_));
+      }
+    }
+  }
+
+  return {
+    status: "error",
+    username,
+    message: `Gagal mengambil data (${lastError?.message || "Network error"})`,
+  };
+}
+
 async function fetchWithRetry(platform, chunk, batchIndex, totalBatches) {
   const maxAttempts = safeRetryCount() + 1;
   const endpoint = endpointByPlatform(platform);
@@ -486,9 +524,38 @@ async function fetchWithRetry(platform, chunk, batchIndex, totalBatches) {
 }
 
 async function runBatchedRequest(platform, entries) {
+  const combined = [];
+
+  // ✅ Instagram: 1 akun per request ke /api/followers/single
+  // Delay dilakukan di frontend → tidak ada timeout di Vercel
+  if (platform === "instagram") {
+    const delayMs = safeDelayMs();
+    const jitterMs = safeJitterMs();
+
+    for (let i = 0; i < entries.length; i++) {
+      const result = await fetchSingleInstagram(entries[i], i + 1, entries.length);
+      combined.push(result);
+
+      // Delay antar request (kecuali yang terakhir)
+      if (i < entries.length - 1 && delayMs > 0) {
+        const jitter = jitterMs > 0 ? Math.floor(Math.random() * (jitterMs + 1)) : 0;
+        await new Promise((resolve) => setTimeout(resolve, delayMs + jitter));
+      }
+    }
+
+    return {
+      total: combined.length,
+      success: combined.filter((r) => r.status === "ok").length,
+      failed: combined.filter((r) => r.status === "error").length,
+      sessionExpired: combined.filter((r) => r.code === "SESSION_EXPIRED").length,
+      requiresSessionRefresh: combined.some((r) => r.code === "SESSION_EXPIRED"),
+      results: combined,
+    };
+  }
+
+  // Platform lain (TikTok, content views): tetap pakai batch ke server
   const size = safeBatchSize();
   const chunks = chunkArray(entries, size);
-  const combined = [];
 
   for (let i = 0; i < chunks.length; i++) {
     try {

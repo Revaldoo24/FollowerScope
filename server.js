@@ -819,24 +819,37 @@ async function fetchInstagramContentViews(contentInput, sessionId) {
 
 // ✅ Endpoint single — 1 akun per request, aman di Vercel (< 3 detik)
 app.post("/api/followers/single", async (req, res) => {
+  const rawInput = req.body?.username;
+  const username = extractProfileUsername(rawInput, "instagram");
+  const sessionId = resolveInstagramSessionId(req.body?.sessionid);
+
+  if (!username) {
+    return res.status(400).json({
+      status: "error",
+      username: String(rawInput || "").trim(),
+      message: "Username atau URL tidak valid.",
+    });
+  }
+
+  if (!sessionId) {
+    // Tanpa session, request dari server/VPS/cloud hampir pasti diblokir Instagram
+    // Tetap coba, tapi tambahkan warning di response jika gagal
+  }
+
   try {
-    const username = extractProfileUsername(req.body?.username, "instagram");
-    const sessionId = resolveInstagramSessionId(req.body?.sessionid);
-
-    if (!username) {
-      return res.status(400).json({ error: "Username tidak valid." });
-    }
-
     const data = await fetchFollowersByUsername(username, sessionId);
     return res.json({ status: "ok", ...data });
   } catch (err) {
     const isSessionExpired = err?.message === "SESSION_EXPIRED";
-    return res.status(isSessionExpired ? 401 : 200).json({
+    const isBlockedByIp = !sessionId && /tidak tersedia|login|blocked/i.test(err.message);
+    return res.status(200).json({
       status: "error",
-      username: req.body?.username,
-      code: isSessionExpired ? "SESSION_EXPIRED" : undefined,
+      username,  // ✅ pakai username yang sudah di-extract, bukan raw input
+      code: isSessionExpired ? "SESSION_EXPIRED" : isBlockedByIp ? "NO_SESSION" : undefined,
       message: isSessionExpired
         ? "Session Instagram expired. Update sessionid lalu coba lagi."
+        : isBlockedByIp
+        ? "IP server diblokir Instagram. Masukkan Session ID agar berhasil."
         : err?.response?.status === 404
         ? "Username tidak ditemukan"
         : `Gagal mengambil data (${err.message})`,
